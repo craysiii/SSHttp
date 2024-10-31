@@ -1,6 +1,8 @@
 ﻿services:
   sshttp:
-    image: sshttp
-    build:
-      context: .
-      dockerfile: Dockerfile
+    image: 'craysiii/sshttp:latest'
+    restart: unless-stopped
+    ports:
+      - '9651:8080'
+    environment:
+      API_KEY: <random string>
