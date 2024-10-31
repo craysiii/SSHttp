@@ -1,0 +1,6 @@
+﻿services:
+  sshttp:
+    image: sshttp
+    build:
+      context: .
+      dockerfile: Dockerfile
