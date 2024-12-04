@@ -109,7 +109,7 @@ public class SessionBroker
 
     public (string[] CommandResults, string? Error) ExecuteCommand(Guid sessionId, ExecuteCommandRequest command)
     {
-        string[] commandResults = [];
+        List<string> commandResults = [];
         string? error = null;
         
         if (!_activeSessions.TryGetValue(sessionId, out var session))
@@ -119,16 +119,33 @@ public class SessionBroker
 
         try
         {
-            using var cmd = session.SshClient.RunCommand(command.Command);
-            commandResults = cmd.Result.Split(command.LineDelimiter);
-            session.Expiry = DateTime.UtcNow.AddSeconds(session.Timeout);
+            if (command.Delay == 0)
+            {
+                using var cmd = session.SshClient.RunCommand(command.Command);
+                commandResults = cmd.Result.Split(command.LineDelimiter).ToList();
+            }
+            else
+            {
+                using var stream = session.SshClient.CreateShellStreamNoTerminal();
+                stream.WriteLine(command.Command);
+                Thread.Sleep(1000 * command.Delay);
+                while (stream.DataAvailable)
+                {
+                    commandResults.Add(stream.ReadLine() ?? string.Empty);
+                }
+            }
+            
         }
         catch (Exception ex)
         {
             error = ex.Message;
         }
+        finally
+        {
+            session.Expiry = DateTime.UtcNow.AddSeconds(session.Timeout);
+        }
         
-        return (commandResults, error);
+        return (commandResults.ToArray(), error);
     }
 
     public (Guid? SessionId, string? Error) RemoveSession(Guid sessionId)
