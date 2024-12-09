@@ -119,7 +119,8 @@ public class SessionBroker
             sessionResponse = new CreateSessionResponse
             {
                 SessionId = sessionId.ToString()!,
-                Banner = banner.ToString()
+                Banner = banner.ToString(),
+                Expiry = session.Expiry
             };
         }
         catch (Exception ex)
@@ -130,45 +131,83 @@ public class SessionBroker
         return (sessionResponse, errorsResponse);
     }
 
-    public (string[] CommandResults, string? Error) ExecuteCommand(Guid sessionId, ExecuteCommandRequest command)
+    public (ExecuteCommandResponse? Command, ErrorsResponse? Errors) ExecuteCommand(Guid sessionId, ExecuteCommandRequest command)
     {
-        List<string> commandResults = [];
-        string? error = null;
+        ExecuteCommandResponse? commandResponse = null;
+        ErrorsResponse? errorsResponse = null;
+        var commandResults = new StringBuilder();
         
+        // Return error if session cannot be found
         if (!_activeSessions.TryGetValue(sessionId, out var session))
         {
-            return ([], $"Session {sessionId} does not exist");
+            return (null, new ErrorsResponse($"Session {sessionId} does not exist"));
         }
 
         try
         {
-            if (command.Delay == 0)
+            // Execute command and create our response object
+            using var cmd = session.SshClient.RunCommand(command.Command);
+            commandResults.Append(cmd.Result);
+
+            commandResponse = new ExecuteCommandResponse
             {
-                using var cmd = session.SshClient.RunCommand(command.Command);
-                commandResults = cmd.Result.Split(command.LineDelimiter).ToList();
-            }
-            else
-            {
-                using var stream = session.SshClient.CreateShellStreamNoTerminal();
-                stream.WriteLine(command.Command);
-                Thread.Sleep(1000 * command.Delay);
-                while (stream.DataAvailable)
-                {
-                    commandResults.Add(stream.ReadLine() ?? string.Empty);
-                }
-            }
-            
+                CommandResults = commandResults.ToString()
+            };
         }
         catch (Exception ex)
         {
-            error = ex.Message;
+            errorsResponse = new ErrorsResponse(ex.Message);
         }
         finally
         {
+            // Extend session expiration by the timeout defined during session creation
             session.Expiry = DateTime.UtcNow.AddSeconds(session.Timeout);
         }
         
-        return (commandResults.ToArray(), error);
+        return (commandResponse, errorsResponse);
+    }
+
+    public (ExecuteCommandResponse? Command, ErrorsResponse? Errors) ExecuteShellCommand(
+        Guid sessionId,
+        ExecuteShellCommandRequest command
+    )
+    {
+        ExecuteCommandResponse? commandResponse = null;
+        ErrorsResponse? errorsResponse = null;
+        var commandResults = new StringBuilder();
+        
+        // Return error if session cannot be found
+        if (!_activeSessions.TryGetValue(sessionId, out var session))
+        {
+            return (null, new ErrorsResponse($"Session {sessionId} does not exist"));
+        }
+
+        try
+        {
+            // Execute command and create our response object
+            session.ShellStream!.WriteLine(command.Command);
+            Thread.Sleep(command.Timeout * 1000);
+            while (session.ShellStream.DataAvailable)
+            {
+                commandResults.Append($"{session.ShellStream.ReadLine()}\n");
+            }
+
+            commandResponse = new ExecuteCommandResponse
+            {
+                CommandResults = commandResults.ToString(),
+            };
+        }
+        catch (Exception ex)
+        {
+            errorsResponse = new ErrorsResponse(ex.Message);
+        }
+        finally
+        {
+            // Extend session expiration by the timeout defined during session creation
+            session.Expiry = DateTime.UtcNow.AddSeconds(session.Timeout);
+        }
+        
+        return (commandResponse, errorsResponse);
     }
 
     public (Guid? SessionId, string? Error) RemoveSession(Guid sessionId)

@@ -92,9 +92,9 @@ app.MapPost("/session/{sessionId:guid}/command",
 
         var command = broker.ExecuteCommand(sessionId, commandRequest);
 
-        return string.IsNullOrWhiteSpace(command.Error) ?
-            Results.Json(new ExecuteCommandResponse(command.CommandResults), statusCode: StatusCodes.Status202Accepted) :
-            Results.Json(new ErrorsResponse(command.Error!), statusCode: StatusCodes.Status400BadRequest);
+        return command.Errors is null ?
+            Results.Json(command.Command, statusCode: StatusCodes.Status202Accepted) :
+            Results.Json(command.Errors, statusCode: StatusCodes.Status400BadRequest);
     })
     .Produces<ExecuteCommandResponse>(StatusCodes.Status202Accepted)
     .Produces<ErrorsResponse>(StatusCodes.Status400BadRequest)
@@ -103,7 +103,38 @@ app.MapPost("/session/{sessionId:guid}/command",
     .WithOpenApi(operation => new OpenApiOperation(operation)
     {
         Summary = "Execute Command",
-        Description = "Execute a command against a session and receive command output as an array of strings"
+        Description = "Execute a command against a session and receive command output as string"
+    });
+
+// Send Shell Command to Session
+app.MapPost("/session/{sessionId:guid}/shellcommand",
+        (
+            [FromRoute] Guid sessionId,
+            [FromBody(EmptyBodyBehavior = EmptyBodyBehavior.Disallow)] ExecuteShellCommandRequest commandRequest,
+            [FromServices] SessionBroker broker,
+            [FromServices] SimpleAuth auth,
+            HttpContext httpContext
+        ) =>
+        {
+            if (!auth.RequestAuthorized(httpContext)) return Results.Unauthorized();
+        
+            var valid = MiniValidator.TryValidate(commandRequest, out var errors);
+            if (!valid) return Results.Json(new ErrorsResponse(errors), statusCode: StatusCodes.Status400BadRequest);
+
+            var command = broker.ExecuteShellCommand(sessionId, commandRequest);
+
+            return command.Errors is null ?
+                Results.Json(command.Command, statusCode: StatusCodes.Status202Accepted) :
+                Results.Json(command.Errors, statusCode: StatusCodes.Status400BadRequest);
+        })
+    .Produces<ExecuteCommandResponse>(StatusCodes.Status202Accepted)
+    .Produces<ErrorsResponse>(StatusCodes.Status400BadRequest)
+    .Produces(StatusCodes.Status401Unauthorized)
+    .WithName("ExecuteShellCommand")
+    .WithOpenApi(operation => new OpenApiOperation(operation)
+    {
+        Summary = "Execute Shell Command",
+        Description = "Execute a command against a session shell and receive command output as a string"
     });
 
 // End Session
