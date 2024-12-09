@@ -6,7 +6,8 @@ public class SessionBroker
 {
     private readonly ConcurrentDictionary<Guid, SshSession> _activeSessions = new();
     private readonly PeriodicTimer _sessionTimer = new(TimeSpan.FromSeconds(1));
-    private readonly string _certificateDirectoryPath = Path.Join(Directory.GetDirectoryRoot(AppDomain.CurrentDomain.BaseDirectory), "certificates");
+    private readonly string _certificateDirectoryPath = Path.Join(
+        Directory.GetDirectoryRoot(AppDomain.CurrentDomain.BaseDirectory), "certificates");
 
     public SessionBroker()
     {
@@ -33,23 +34,24 @@ public class SessionBroker
         }
     }
 
-    public (Guid? SessionId, string? Error) CreateSession(CreateSessionRequest sessionRequest)
+    public (CreateSessionResponse? Session, ErrorsResponse? Errors) CreateSession(CreateSessionRequest sessionRequest)
     {
-        Guid? sessionId;
-        string? error = null;
+        CreateSessionResponse? sessionResponse = null;
+        ErrorsResponse? errorsResponse = null;
 
+        // Validate we're received some type of authentication or return an error
         if (string.IsNullOrWhiteSpace(sessionRequest.Password) &&
             string.IsNullOrWhiteSpace(sessionRequest.CertificatePath))
         {
-            return (null, "You must provide a password or certificate path.");
+            return (null, new ErrorsResponse("You must provide a password or certificate path."));
         }
-        
+
         try
         {
-            sessionId = Guid.NewGuid();
-
+            Guid? sessionId = Guid.NewGuid();
             List<AuthenticationMethod> authenticationMethods = [];
-            
+
+            // Add password authentication if applicable
             if (!string.IsNullOrWhiteSpace(sessionRequest.Password))
             {
                 authenticationMethods.Add(
@@ -57,54 +59,75 @@ public class SessionBroker
                 );
             }
 
+            // Add certificate authentication if applicable
             if (!string.IsNullOrWhiteSpace(sessionRequest.CertificatePath))
             {
                 var certificatePath = Path.Join(_certificateDirectoryPath, sessionRequest.CertificatePath);
-                if (!File.Exists(certificatePath)) return (null, "Certificate file does not exist.");
-                
+                if (!File.Exists(certificatePath))
+                    return (null, new ErrorsResponse("Certificate file does not exist."));
+
                 authenticationMethods.Add(
                     new PrivateKeyAuthenticationMethod(
                         sessionRequest.Username,
-                        string.IsNullOrWhiteSpace(sessionRequest.CertificatePassphrase) ? 
-                            new PrivateKeyFile(certificatePath) :
-                            new PrivateKeyFile(certificatePath, sessionRequest.CertificatePassphrase)
+                        string.IsNullOrWhiteSpace(sessionRequest.CertificatePassphrase)
+                            ? new PrivateKeyFile(certificatePath)
+                            : new PrivateKeyFile(certificatePath, sessionRequest.CertificatePassphrase)
                     )
                 );
             }
 
+            // Create our ConnectionInfo object manually so we can account for either types of auth before creating client
             var connectionInfo = new ConnectionInfo(
                 sessionRequest.Host,
                 sessionRequest.Port,
                 sessionRequest.Username,
                 authenticationMethods.ToArray()
             );
-            
+
+            // Initialize our client and attempt to connect
             var client = new SshClient(connectionInfo);
             client.Connect();
 
-            var currentTime = DateTime.UtcNow;
 
+
+            // Create our session object if connection was successful
+            var currentTime = DateTime.UtcNow;
             var session = new SshSession
             {
                 SshClient = client,
                 Timeout = sessionRequest.Timeout,
-                Expiry = currentTime.AddSeconds(sessionRequest.Timeout)
+                Expiry = currentTime.AddSeconds(sessionRequest.Timeout),
+                ShellStream = client.CreateShellStreamNoTerminal()
             };
 
-            var success = false;
+            // Read banner from shell stream
+            var banner = new StringBuilder();
+            Thread.Sleep(1000);
+            while (session.ShellStream.DataAvailable)
+            {
+                banner.Append($"{session.ShellStream.ReadLine()}\n");
+            }
 
+            // We're not successful until we can add the session to our concurrent dictionary
+            var success = false;
             while (!success)
             {
                 success = _activeSessions.TryAdd(sessionId.Value, session);
             }
+
+            // Create our response
+            sessionResponse = new CreateSessionResponse
+            {
+                SessionId = sessionId.ToString()!,
+                Banner = banner.ToString()
+            };
         }
         catch (Exception ex)
         {
-            error = ex.Message;
-            sessionId = null;
+            errorsResponse = new ErrorsResponse(ex.Message);
         }
         
-        return (sessionId, error);
+        return (sessionResponse, errorsResponse);
     }
 
     public (string[] CommandResults, string? Error) ExecuteCommand(Guid sessionId, ExecuteCommandRequest command)

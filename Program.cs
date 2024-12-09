@@ -60,9 +60,9 @@ app.MapPost("/session",
 
         var session = broker.CreateSession(sessionRequest);
 
-        return string.IsNullOrWhiteSpace(session.Error) ?
-            Results.Json(new CreateSessionResponse(session.SessionId!.Value), statusCode: StatusCodes.Status201Created) :
-            Results.Json(new ErrorsResponse(session.Error!), statusCode: StatusCodes.Status400BadRequest);
+        return session.Errors is null ?
+            Results.Json(session.Session, statusCode: StatusCodes.Status201Created) :
+            Results.Json(session.Errors, statusCode: StatusCodes.Status400BadRequest);
     })
     .Accepts<CreateSessionRequest>("application/json")
     .Produces<CreateSessionResponse>(StatusCodes.Status201Created)
