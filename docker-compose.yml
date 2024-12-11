@@ -6,3 +6,5 @@
       - '9651:8080'
     environment:
       API_KEY: <random string>
+      # Uncomment the following line to enable logging of all HTTP requests and responses
+      # "ASPNETCORE_Logging__LogLevel__Microsoft.AspNetCore.HttpLogging.HttpLoggingMiddleware": "Information"

@@ -12,6 +12,12 @@ builder.Services.Configure<JsonOptions>(options =>
     options.JsonSerializerOptions.PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower;
 });
 
+builder.Services.AddHttpLogging(options =>
+{
+    options.CombineLogs = true;
+    options.LoggingFields = HttpLoggingFields.All;
+});
+
 // Configure swagger/openapi
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen(options =>
@@ -31,6 +37,8 @@ builder.Services.AddSingleton<SimpleAuth>();
 builder.WebHost.UseUrls("http://0.0.0.0:8080");
 
 var app = builder.Build();
+
+app.UseHttpLogging();
 
 // Configure swagger page to be index
 app.UseSwagger();
